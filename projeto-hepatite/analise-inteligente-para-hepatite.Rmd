@@ -1,0 +1,553 @@
+---
+title: "Análise Inteligente dos Dados (Yuri AT)"
+output:
+  html_document:
+    toc: true
+    toc_depth: 6
+    theme: united
+---
+
+
+```{r include = FALSE}
+#setwd("C:/Users/Yuri/Documents")
+dir = "D:/MEGA/[Mestre]/Curso R/projeto"
+```
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(readxl)
+library(tidyverse)
+library(ggplot2)
+library(gridExtra)
+library(data.table)
+library(vcd)
+library(vcdExtra)
+library(e1071)
+library(stats)
+library(caret)
+library(klaR)
+library(portfolio)
+library(treemap)
+library(tree)
+library(party)
+library(rpart)
+library(rpart.plot)
+library(lattice)
+library(questionr)
+library(lmtest)
+library(treemapify)
+library(PerformanceAnalytics)
+library(corrplot)
+library(jtools)
+library(psych)
+library(scales)
+
+farma <- read_excel(paste(dir,"final_farma_zero.xlsx", sep="/"), 
+                    sheet = "anual", range = "A1:I55", col_types = c("numeric", 
+                                                                     "text", "text", "text", "text", "numeric", 
+                                                                     "numeric", "numeric", "numeric"))
+attach(farma)
+
+farma2 <- read_excel(paste(dir,"final_farma_two.xlsx", sep="/"), 
+                     sheet = "pf_anual", range = "A1:G180")
+attach(farma2)
+farma2$ano <- as.character(farma2$ano)
+
+c_repet <- read_excel(paste(dir,"hepatite_sheets.xlsx", sep="/"), sheet = "com_repeticao",
+                      range = "A1:V163")
+attach(c_repet)
+
+c_repet2 <- read_excel(paste(dir,"hepatite_sheets.xlsx", sep="/"), 
+    sheet = "com_repeticao2", range = "A1:V163")
+attach(c_repet2)
+
+hcvdata16 <- read_excel(paste(dir,"hcvdata2.xlsx", sep="/"),
+                        range = "A1:Q28")
+attach(hcvdata16)
+
+hcvdata17 <- read_excel(paste(dir,"hcvdata2.xlsx", sep="/"), 
+                        sheet = "hcvdata17", range = "A1:Q28")
+attach(hcvdata17)
+
+hcvdata16 <- as.data.frame(hcvdata16)
+hcvdata17 <- as.data.frame(hcvdata17)
+
+#convertendo siglas a fatores
+for (i in c("uf16","regiao16")){
+  hcvdata16[,i]=as.factor(hcvdata16[,i])
+}
+for (i in c("uf17","regiao17")){
+  hcvdata17[,i]=as.factor(hcvdata17[,i])
+}
+
+#--------------Separados por Regiões 
+c_repet <- as.data.frame(c_repet)
+f_ne <- subset(c_repet, regiao == "NE")
+f_co <- subset(c_repet, regiao == "CO")
+f_no <- subset(c_repet, regiao == "NO")
+f_se <- subset(c_repet, regiao == "SE")
+f_su <- subset(c_repet, regiao == "SU")
+
+#Gráfico de barras da dispensação(ponderada) por ano por região. 
+require(grDevices)
+da <- ggplot(data=farma, aes(x=regiao, y=dacl,  fill=ano)) +
+  geom_bar(stat="identity")
+da <- da +
+  xlab("") + ylab("Daclastavir") + theme(legend.position="none")
+
+so <- ggplot(data=farma, aes(x=regiao, y=sulfo, fill=ano)) +
+  geom_bar(stat="identity")
+so <- so + xlab("") + ylab("Sofosbuvir") + theme(legend.position="none")
+
+sm <- ggplot(data=farma, aes(x=regiao, y=sime, fill=ano)) +
+  geom_bar(stat="identity")
+sm <- sm + xlab("") + ylab("Simeprevir") + theme(legend.position="none")
+
+
+#Gráfico de barras por dispensação regional total de fármacos
+g <- ggplot(data=farma2, aes(x=ano, y=distribui, fill= drug)) + geom_bar(stat = "identity")
+g <- g + ggtitle("Dispensação total de medicamentos sofre queda em 2017") +
+  xlab("Regiões") + ylab("Dispensação total") + labs(fill = "Fármacos")
+
+#Boxplot da dispensação(ponderada) de cada medicamento por região  
+my.bp <<-ggplot(data=c_repet2, aes(y= distribui, x=regiao, fill=drug ) ) #cria o boxplot
+my.bp <- my.bp + geom_boxplot() #adiciona cores
+my.bp <- my.bp + ggtitle("Dispensação por região em boxplot") #titulo
+my.bp <- my.bp +  ylab("Dispensação/1% da população") + xlab("Região") + labs(fill = "Fármacos") #legendas
+
+#------ Logaritimizando tudo
+#2016
+log_hcvdata16 <- hcvdata16
+log_hcvdata16[4,5] <- 0.1
+log_hcvdata16[25,4] <- 0.1
+log_hcvdata16[4,17] <- 0.1
+log_hcvdata16[7,17] <- 0.1
+#Testando normalidade da variável resposta em LOG
+for (i in c(7:11)){
+  log_hcvdata16[,i]=log10(((log_hcvdata16[,i])*10))
+}
+for (i in c(3:5)){
+  log_hcvdata16[,i]=log10(((log_hcvdata16[,i])*10))
+}
+log_hcvdata16$obitos16p <- log_hcvdata16$obitos16p*10
+log_hcvdata16$obitos16p <- log10(log_hcvdata16$obitos16p)
+
+#2017
+log_hcvdata17 <- hcvdata17
+log_hcvdata17[7,5] <- 0.1
+#Testando normalidade da variável resposta em LOG
+for (i in c(7:11)){
+  log_hcvdata17[,i]=log10(((log_hcvdata17[,i])*10))
+}
+for (i in c(3:5)){
+  log_hcvdata17[,i]=log10(((log_hcvdata17[,i])*10))
+}
+log_hcvdata17[4,17] <- 0.1
+log_hcvdata17[7,17] <- 0.1
+log_hcvdata17$obitos16p <- log_hcvdata17$obitos16p*10
+log_hcvdata17$obitos16p <- log10(log_hcvdata17$obitos16p)
+
+
+#----- Removendo colunas para regressão linear
+rl16 <- subset(log_hcvdata16, select = -c(uf16, dacl_2016p,sulfo_2016p,sime_2016p, obitos16pc))
+rl16 <- as.data.frame(rl16)
+rl16$regiao16 <- as.factor(rl16$regiao16)
+
+rl17 <- subset(log_hcvdata17, select = -c(uf17, dacl_2017p,sulfo_2017p,sime_2017p, obitos16pc))
+rl17 <- as.data.frame(rl17)
+rl17$regiao17 <- as.factor(rl17$regiao17)
+
+```
+
+### Introdução 
+  A cronificação da hepatite C (HCV) é considerada um problema de saúde pública. Logo, sendo o principal objetivo do tratamento erradicar o HCV e melhorar a qualidade de vida dos pacientes, o monitoramento do horizonte do tratamento é de suma importância. Assim sendo, em 2015, no Sistema Único de Saúde (SUS) foram liberados os fármacos sofosbuvir, daclatasvir e simeprevir para tratamento da Hepatite C dos genótipos 1, 2, 3 e 4 com fibrose avançada e de coinfectados pelo HIV-1. Sendo o regime terapêutico mais recomendado, a combinação dos fármacos sofosbuvir+simeprevir ou sofosbuvir+daclatasvir. 
+
+####Objetivo
+  O objetivo dessa análise é comparar o impacto da inserção da dispensação de  novos medicamentos para o tratamento do HCV nu SUS. As novas recomendaçõe implicam em maior dispensação dos medicamentos daclastavir, simeprevir e sofosbuvir segundo o regime terapêutico. Com isso queremos verificar primeiramente **se o protocolo recomendando está sendo seguido**. E então o quanto o perfil da dispensação total desses medicamentos varia em cada estado no período de impletação (entre janeiro de 2016 e dezembro de 2017). Com o interesse final de estimar dentre o perfil observado quais podem vir a ser as variáveis secundárias mais explicativas para a mortalidade estadual do HCV e qual modelo preditivo pode ser aplicado dado as variáveis secundárias. 
+
+####Descrição dos dados
+  Os dados aqui analisados foram obtidos pela plataforma online de livre acesso do DATASUS  (<http://tabnet.datasus.gov.br>) e exportados em diferentes tabelas contendo a quantidade apresentada por local de atendimento na produção ambulatorial do sus para a combinação de fármacos recomendados no tratamento da hepatite C. Que são eles o daclastavir (60 mg), sofosbuvir (60 mg) e simeprevir (150 mg). As colunas de cada tabela foram subdivididas pelo ano de registro e cada linha corresponde a frequência apresentada por unidade de federação. Também foram incluidos dados referentes ao IDH e a infraestrutura para dispensação de fármacos de cada unidade de federação todos relativizados pela população total de cada estado ou pela população de incidência em dois conjuntos de dados diferentes (um parao ano de 2016 e outro para o ano de 2017).
+
+<P style="page-break-before: always">
+
+#####Variáveis
+
+**Taxa = variável controlada (dividida) pela potencial população de risco para HCV- [1% do estado]**
+
+1) uf = sigla referente aos estados (char-fator)
+2) regiao = sigla referente as regiões (char-fator)
+3) obitos16pc =  *Logarítimo na base 10* do coeficiente de mortalidade por HCV, por 100.000 habitantes (p/ maior normalização)
+4) incidencia16p = Coeficiente de detecção por 100.000 habitantes de casos com marcador anti-HCV reagente e HCV-RNA reagente
+5) dacl_2016 = **Taxa** da dispensação de comprimidos do medicamento daclastavir (60 mg) 
+6) sulfo_2016 = **Taxa** da dispensação de comprimidos do medicamento sofosbuvir (60 mg)
+7) sime_2016 = **Taxa** da dispensação de comprimidos do medicamento simeprevir (150 mg) 
+8) dispensa16p = **Taxa** da dispensação total de comprimidos dos três medicamento
+9) farmacia16p = **Taxa** de estabelecimentos de saúde (na PNAF) em que é feita a dispensação de medicamentos excepcionais
+10) ensino16 = **Taxa** de centros médicos com atividade de ensino
+11) infraestrutura16p = **Taxa** do quantitativo geral de estabelecimentos de saúde contidos no CNES
+12) habilita16 = Estabelecimentos de saúde hablitados a realizar a detecção por marcador anti-HCV reagente e HCV-RNA reagente
+13) IDHM_renda =  Índice de Desenvolvimento Humano Municipal de Renda (2010)
+14) IDHM_logevidade =  Índice de Desenvolvimento Humano Municipal de Longevidade (2010)
+15) IDHM_educacao =  Índice de Desenvolvimento Humano Municipal de Educação (2010)
+16) gini = Índice de desigualdade estadual em 2010
+17) obitos16p = Coeficiente de mortalidade por HCV, por 100.000 habitantes
+</P>
+
+###Análise descritiva para protocolo de distribuição dos fármacos
+
+#####Representações por mapas de árvore (treemap)
+
+  Nossa primeira hipótese foi de que a adesão ao protocolo recomendado para dispensação dos medicamentos fosse diferente entre os estados e regiões, dentre os anos de 2016 e 2017. Dado a possíveis problemas de registro ou da própria infraestrutura e demanda de cada estado. Assim sendo, para melhor visualizarmos a distribuição das variáveis perante o protocolo da dispensação dos medicamentos usamos o *treemap* como uma representação hierárquica da dispensação dos três diferentes medicamentos primeiramente pelas regiões, então pelos anos e for fim **categorizadas por cada estado** subdividido em regiões e ano.
+  
+```{r treemap, echo=FALSE}
+#Treemaps
+labelAlr = list(c('left','top'),c('right','bottom'))
+
+treemap(c_repet, index = c('regiao','ano'), vSize = 'distribui', title='Distribuição anual por região', fontsize.labels = c(18,14), fontface.labels = c(2,3), align.labels = labelAlr, vertex.label.dist = TRUE)
+treemap(farma2, index = c('drug','ano'), vSize = 'distribui', title='Dispensação anual por medicamento', fontsize.labels = c(18,14), fontface.labels = c(2,3), align.labels = labelAlr, vertex.label.dist = TRUE)
+
+labelAlrd = list(c('left','top'),c('left','center'),c('right','bottom'))
+treemap(c_repet, index = c('regiao','ano','drug'), vSize = 'distribui',
+        title='Dispensação regional de cada fármaco por ano', fontsize.labels = c(13,9,8), fontface.labels = c(2,3,2), align.labels = labelAlrd)
+
+
+labelAlrd = list(c('left','top'),c('left','center'),c('right','bottom'))
+ne <- treemap(f_ne, index = c('sigla','ano','drug'), vSize = 'distribui',
+              title='Nordeste', fontsize.labels = c(11,9,8), fontface.labels = c(1,3,2), align.labels = labelAlrd)
+
+no<- treemap(f_no, index = c('sigla','ano','drug'), vSize = 'distribui',
+             title='Norte', fontsize.labels = c(10,9,8), fontface.labels = c(1,3,2), align.labels = labelAlrd)
+
+co <- treemap(f_co, index = c('sigla','ano','drug'), vSize = 'distribui',
+              title='Centro-oeste', fontsize.labels = c(10,9,8), fontface.labels = c(1,3,2), align.labels = labelAlrd)
+
+su <- treemap(f_su, index = c('sigla','ano','drug'), vSize = 'distribui',
+              title='Sul', fontsize.labels = c(10,9,8), fontface.labels = c(1,3,2), align.labels = labelAlrd)
+
+se <- treemap(f_se, index = c('sigla','ano','drug'), vSize = 'distribui',
+              title='Sudeste', fontsize.labels = c(10,9,8), fontface.labels = c(1,3,2), align.labels = labelAlrd)
+```
+
+Através dos treemaps podemos perceber que em sua maioria o protocolo  recomendado para a dispensação aparenta estar sendo seguido. Dentre os estados que apresentam certa exceção a regra, temos Roraima, Tocantins e Mato Grosso do Sul, que apresentam ausência na dispensação de simeprevir em 2017. Em relação a variação dentre os anos a tendência é que a dispensação em 2017 seja ligeiramente menor do que a dispensação em 2016, salvo algumas exceções estaduais (como a maior dispensação em 2017 do que em 2016 apresentada pela Bahia e pelo Rio Grande do Sul e grande queda da dispensação em 2017 no Distrito Federal). Além disso o mapa das regiões demonstra uma alta dispensação total na região sudeste, impulsionada pelos estados São Paulo e Rio de Janeiro, o que era de se esperar dado a infraestrutura para atendimento, alta concentração populacional e incidência do HCV nesses estados. 
+
+No gráfico de barras apresentado abaixo a tendência de menor dispensação em 2017 é reforçada, mesmo com a inserção de um novo protocolo de tratamento (combinação 3D liderada por ombitasvir) não influenciando a proporção do protocolo recomendado anteriormente. 
+
+```{r g2, echo = FALSE}
+g
+my.bp
+```
+
+O boxplot acima demonstra a influência do outlier na região sudeste para a taxa de dispensação, mesmo essa sendo controlada pela população estadual. Apesar dessa distorção, pelo boxplot podemos observar que as demais regiões possuem média similares e menor impacto de seus outliers, seguindo o protocolo de forma correlacionado
+
+#####Correlação entre a taxa de dispensação dos diferentes medicamentos
+
+```{r correlacaomedicamentos}
+cor(hcvdata16[,c(3:5)]) 
+```
+
+#####Considerações iniciais 
+
+A própria correlação entre as dispensações dos diferentes medicamentos, indica que o protocolo recomendado para a dispensação está sendo seguido. Assim sendo, podemos concluir que, de maneira geral a dispensação entre os diferentes medicamentos é padronizada entre os estados sendo mais interessante agregarmos em uma *dispensação total* para a modelagem. 
+
+###Análise descritiva para o índice de mortalidade
+
+  Logo, precisamos então verificar como as demais variáveis explanatórias estão distribuidas. Para tal iremos usar a função **summary** e a *correlação* entre essas variáveis, dado que através delas podemos ter uma visualização primária de quais varíaveis apresentam maior correlação com a taxa de mortalidade, variável de saída que almejamos compreender e predizer. Para a variável de interesse (mortalidade) precisamos verificar que tipo de distribuição está sendo seguida, para melhor entender qual modelo melhor se aplica ao caso. Para tal iremos usar o histograma e consequentes testes para uma distribuição normal (dado que temos a mortalidade de 27 estados)
+
+```{r resumo}
+#Resumo dos dados de 2016
+summary(hcvdata16)
+```
+
+#####Verificando distribuição do índice de mortalidade controlado X não controlado.
+
+```{r normalidade, echo= FALSE}
+#Testando normalidade da variável resposta
+par(mfrow=c(2,2))
+hist(hcvdata16$obitos16p, main="Mortalidade não segue distrib. normal", xlab="Índice de mortalidade p/ 100.000 habitantes", ylab = "Frequência")
+qqnorm(hcvdata16$obitos16p)
+qqline(hcvdata16$obitos16p)
+
+#Testando normalidade da variável resposta em LOG
+hist(log_hcvdata16$obitos16p, main="Log da mortalidade é normalizado", xlab="log(mortalidade)", ylab = "Frequência")
+qqnorm(log_hcvdata16$obitos16p)
+qqline(log_hcvdata16$obitos16p)
+
+#Shapiro-Wilk rejeitando normalidade com p>0.05
+shapiro.test(hcvdata16$obitos16p)
+#Shapiro-Wilk rejeita normalidade mesmo com transformação (p>0.05)
+shapiro.test(log_hcvdata16$obitos16p)
+
+par(mfrow=c(1,1))
+plot(hcvdata16$obitos16p,log_hcvdata16$obitos16p, main = "Relação da transformação no índice de mortalidade", xlab="Índice de mortalidade real", ylab="Log10(mortalidade*10)")
+
+```
+
+Pelos gráficos e pelo resultado do Shapiro-test no índice de mortalidade transformado (p > 0.05), podemos observar que o índice de mortalidade passa a seguir uma distribuição normal. A transformação aqui utilizada foi a aplicação do logarítimo na base 10 do índice de mortalidade multiplicado por 10, de forma a manter a escala positiva e reduzir o impacto dos valores extremos que já eram esperados na distribuição devido ao perfil díspare de alguns estados. A mesma transformação foi aplicada nas demais variáveis numéricas, visto que todas sofrem as mesmas influências estaduais, com isso podemos melhor verificar a correlação presente entre as variáveis 
+
+#####Correlação por cores e tamanho dentre as variáveis numéricas
+
+```{r correlacoes}
+x <- cor(hcvdata16[3:16])
+corrplot(x, type="upper", order="hclust")
+```
+
+Nesse gráfico podemos confirmar algumas correlações esperadas, como a correlação dentre os IDH's e dentre as dispensações dos medicamentos isoladamente em comparação a dispensação total, que é uma combinação linear desses. Além disso podemos observar que o índice de mortalidade (obitos16pc)
+possui maior correlação com fatores de incidência, infraestrutura, dispensação e o índice de Gini (negativamente). Assim sendo, no gráfico a seguir observamos o perfil de distribuição dessas variáveis (**transformadas pelo logarítmo na base 10**) que aparentaam estar mais interligadas com o índice de mortalidade, bem como a correlação entre elas de forma gráfica e numérica.
+
+#####Distruibuição e correlação entre as variáveis que parecem mais interligadas à mortalidade
+
+```{r correlacoes2}
+#Gráfico de distruibuição e correlação entre as variáveis que parecem estar mais interligadas ao ínidice de mortalidade 
+chart.Correlation(subset(log_hcvdata16, select = c(obitos16p,incidencia16p,dispensa16p,infraestrutura16p,gini16)))
+```
+
+####Análise dos outliers
+
+Mesmo com as transformações aplicadas, ainda poderiam existir outliers multivariados que comprometessem o uso de alguma modelagem, para verificá-los usamos a distância de Mahalanobis que não assume a ausência de covariância em seu cálculo. observados na taxa de mortalidade também aparentam afetar as varíaveis secundárias de maior correlação com a taxa de mortalidade, sendo realmente mais interessante removê-los do banco de dados para melhor análise.
+
+```{r outlier, echo = FALSE}
+#identificação de outliers 
+hcv16b <- log_hcvdata16
+row.names(hcv16b) <- hcv16b$uf16
+hcv16b <- hcv16b[,-1] 
+xh <- hcv16b[6:16]
+outlier(xh)
+```
+
+Por esse gráfico podemos observar que os estados que mais se distanciam do centro são Rondônia, Roraima, Acre, Alagoas e o Distrito Federal, o que é de certa forma coerente com o observado anteriormente nos *treemaps*. Além de demonstrar que a tranformação das variáveis diminuiu o impacto dos estados do Rio de Janeiro e São Paulo. O que se torna ainda mais evidente no scatterplot abaixo que com a **remoção dos outliers**, inclui a dispensação pela infraestrura crescente de forma aproximadamente linear dentre todas as regiões e uma tendência a maiores índices de mortalidade com o aumento da dispensação, podendo essa estar indicando a gravidade do HCV por localidade.  
+```{r outscaterr, echo = FALSE}
+#Scatterplot sem outliers
+yh <- log_hcvdata16[-c(1,2,4,14,27), ]
+yh <- as.data.frame(yh)
+for (i in c("uf16","regiao16")){
+  yh[,i]=as.factor(yh[,i])
+}
+gg2 <- ggplot(yh, aes(x=infraestrutura16p, y=dispensa16p)) + 
+  geom_point(aes(col=regiao16, size=obitos16p)) + 
+  geom_smooth(method="lm") +
+  labs(title="Scateerplot da dispensação pela infraestrutura com mortalidade regional", y="Dispensação/(1% da população) em 2016", x="Infraestrutura apresentada em 2016")
+gg2 <- gg2 + labs(color="Região", size="Mortalidade em 2016")
+plot(gg2)
+```
+
+###Regressão linear múltipla
+O scatterplot de impacto da infraestrutura com a dispensão de fármacos na taxa de mortalidade por região parecia ter um tendência a correlação linearidade. Assim sendo, testamos o modelo linear tratando os dados de 2017 como os dados de teste e os dados de 2016 como os dados de treinamento e comparamos esses resultados com os gerados pela subdivisão do banco de dados de 2016 em 70% treinamento e 30% teste. 
+
+####Definindo os conjuntos de treinamento e teste
+
+```{r conjuntos}
+#----Grupos de treinamento (banco de 2016) e teste (banco de 2017)
+ta16 <- rl16
+te17 <- rl17
+dim(ta16)
+dim(te17)
+#------Grupos de treinamento (70%) e teste (30%)
+set.seed(314)
+indexes <- sample (1:nrow(rl16), size=.3*nrow(rl16))
+hcv16test <- rl16[indexes,]
+hcv16train <- rl16[-indexes,]
+dim(hcv16test)
+dim(hcv16train)
+```
+
+####Modelo linear com banco de dados de 2016 completo
+
+```{r modelo0}
+modelo0 = lm(rl16$obitos16p ~., data=rl16)
+summary(modelo0)
+#ANOVA do modelo
+anova(modelo0)
+## Importância das variáveis
+varImp(modelo0)
+par(mfrow=c(2,2))
+plot(modelo0)
+```
+
+####Modelo linear subdividindo o mesmo grupo
+
+```{r modelo1}
+modelo1 = lm(hcv16train$obitos16p ~., data=hcv16train)
+summary(modelo1)
+#ANOVA do modelo
+anova(modelo1)
+## Importância das variáveis
+varImp(modelo1)
+par(mfrow=c(2,2))
+plot(modelo1)
+```
+
+####Comparando modelos lineares
+
+
+```{r comparando2, echo = FALSE}
+colnames(rl17) <- colnames(rl16)
+lipred1 <- predict(modelo0,newdata=rl17)
+result1 <- rl17$obitos16p
+lipred2 <- predict(modelo1,newdata=hcv16test)
+result2 <- hcv16test$obitos16p
+#comparação de modelos
+par(mfrow=c(1,2))
+plot(result1,lipred1, main = "previsão em 2017", cex=0.5, xlab="Índice de mortalidade real", ylab="Índice de mortalidade previsto")
+plot(result2,lipred2, main = "previsão em subgrupo de 2016", cex=0.5, xlab="Índice de mortalidade real", ylab=" ")
+```
+
+#####correlação no modelo de predição em 2017
+
+```{r corrl12017, echo = FALSE}
+cor(result1,lipred1)
+postResample(pred = lipred1, obs = result1)
+```
+
+#####correlação no modelo de predição em subgrupo 
+```{r corrl12016, echo= FALSE}
+cor(result2,lipred2)
+postResample(pred = lipred2, obs = result2)
+```
+
+No modelo de regressão linear múltipla com o banco de dados de 2016 completo, observamos um r² ajustado maior que 0.5 no qual a dispensação e o IDHM de educação eram significativamente importantes para a formulação do modelo. Como a amostra (27 estados) é uma amostra relativamente pequena, podemos observar que a subdivisão em grupo de teste e treinamento altera a performance do modelo, reduzindo o r².
+Já para analisar a capacidade de predição dos modelos usamos os indicadores MAE e RMSE que podem ser usados juntos para diagnosticar variações e erros em um conjunto de previssão por regressão. Sendo o RMSE sempre maior ou igual ao MAE e quanto maior a diferença entre eles, maior a variação nos erros individualmente. Quanto menor os valores de MAE e RMSE melhor. Logo, o modelo de predição com os dados de 2017 apresenta boa correlação e bons índices. O que também parece ser o caso para a predição no subgrupo. Contudo, como a redução de variáveis deixara o modelo de treinamento pior ajustado, a capacidade de predição para o grupo teste torna-se inconclusiva. 
+
+###Componentes principais (PCA) para distinguir as variáveis mais relevantes
+Eliminando as dispensações de cada um dos fármacos da análise, as regiões e a taxa de mortalidade não normalizada, restam 11 variáveis que podem potencialmente explicar o indíce de mortalidade por hepatite C, para melhor analisar a relevância e as possíveis correlações entre cada uma delas iremos aplicar a técnica de componentes principais.
+
+```{r pca}
+PC <- princomp(log_hcvdata16[7:16],cor=TRUE, scores=TRUE, fix_sign=TRUE)
+#attributes(PC)
+summary(PC)
+boxplot(PC$scores)
+screeplot(PC) # No. CPs relevantes
+print(PC$loadings)
+biplot (PC, cex= c(.5,1)) 
+### PCA - prcomp()
+PrC <- prcomp(log_hcvdata16[7:16], retx = FALSE, center = TRUE, scale. = TRUE,
+              tol = NULL, rank. = 5)
+PrC$rotation
+
+# Salvar  as 5 componentes principais
+#2016
+cph16 <<- within(rl16, {
+  PC5_incidencia <- PC$scores[,5]
+  PC4_habilitacao <- PC$scores[,4]
+  PC3_gini <- PC$scores[,3]
+  PC2_estrutural <- PC$scores[,2]
+  PC1_social <- PC$scores[,1]})
+cph16 <- cph16[, -c(2:11)]
+
+#2017
+PC17 <- princomp(rl17[3:12],cor=TRUE, scores=TRUE, fix_sign=TRUE)
+cph17 <<- within(rl17, {
+  PC17_5_incidencia <- PC17$scores[,5]
+  PC17_4_habilitacao <- PC17$scores[,4]
+  PC17_3_gini <- PC17$scores[,3]
+  PC17_2_estrutural <- PC17$scores[,2]
+  PC17_1_social <- PC17$scores[,1]})
+cph17 <- cph17[, -c(2:11)]
+```
+
+A PCA indica que separar os IDHM por renda, longevidade e educação não seria relevante, e que as variáveis coeficiente de Gini, taxa de farmácias especializadas, taxa de infraestrutura, número de centro habilitados e dispensação são as variáveis que melhor explicam os principais componentes. Podemos então trabalhar com as componentes salvas para a modelagem. 
+
+######Componentes salvas
+
+1) PC1_social = impactada pelos IDH's estaduais (explica 0.51)
+2) PC2_estrutural = impactada pelo log das taxas de dispensação, farmácias, centros de ensino especializados e infraestrura geral (explica 0.27)
+3) PC3_gini = impactada principalmente pelo coeficiente de Gini (explica 0.07)
+4) PC4_habilitacao = impactada principalmente pelos centros habilitados à realizar testes para o HCV (explica 0.06)
+5) PC5_incidencia = impactado pelo log da taxa de incidência (explica 0.03)
+
+####Regressão linear com componentes principais
+```{r rlcp}
+modelocp = lm(cph16$obitos16p ~., data=cph16)
+summary(modelocp)
+#ANOVA do modelo
+anova(modelocp)
+## Importância das variáveis
+varImp(modelocp)
+par(mfrow=c(2,2))
+plot(modelocp)
+```
+
+```{r rlpcgraph, echo= FALSE}
+par(mfrow=c(1,1))
+colnames(cph17) <- colnames(cph16)
+lipred_cp <- predict(modelocp,newdata=cph17)
+result_cp <- cph17$obitos16p
+plot(result_cp,lipred_cp, main = "Previsão em 2017 com componentes principais", cex=0.5, xlab="Índice de mortalidade real", ylab="Índice de mortalidade previsto")
+cor(result_cp,lipred_cp)
+postResample(pred = lipred_cp, obs = result_cp)
+
+```
+
+O r² ajustado da regressão linear múltipla com as componentes principais demonstra que essas não parecem explicar o índice de mortalidade. Logo, podemos observar que a covariância entre as variavéis que compõem o modelo, quando tratadas separadamente (como nas regressões anteriores) geram resultados díspares. 
+
+###Árvore de regressão
+A árvore de regressão para variáveis de saída numéricas possui fórmula similar a utilizada nas regressões acima, contudo através dela também podemos analisar o impacto de fatores não numéricos (como as regiões) e ter uma visão mais gráfica das subdivisões geradas pela variação nos dados. Na construção do gráfico da árvore cada ramo apresenta a porcentagem de variáveis contidas naquele ramo que apresentam a mesma média na variável resposta, de forma crescente.  
+
+#####Árvore com banco de dados de 2016 completo
+
+```{r tree1}
+fit <- rpart(rl16$obitos16p~ .,
+             method="anova", data=rl16, minsplit = 2, minbucket = 1)
+rpart.plot(fit)
+summary(fit)
+pred <- predict(fit, rl17, weigth = peso2)
+```
+
+
+```{r tree3, echo = FALSE}
+treehc16<- subset(log_hcvdata16,select= -c(uf16,dacl_2016p,sulfo_2016p,sime_2016p,obitos16p))
+
+#GRUPO DE TREINAMENTO E TESTE COM OUTLIER
+set.seed(314)
+indexes <- sample (1:nrow(treehc16), size=.3*nrow(treehc16))
+testhc <- treehc16[indexes,]
+trainhc <- treehc16[-indexes,]
+rtree_fit <- rpart(trainhc$obitos16p ~ ., 
+                   method="anova", data= trainhc)
+fit4 <- rpart(trainhc$obitos16p~ .,
+             method="anova", data=trainhc, minsplit = 2, minbucket = 1)
+pred2 <- predict(fit4, testhc, weigth = peso2)
+```
+
+
+####Predição pela árvore de regressão
+
+```{r comparando, echo = FALSE}
+par(mfrow=c(1,2))
+plot(rl17$obitos16p,pred, main = "Árvore predic. em 2017", cex=0.5, xlab="Índice de mortalidade real", ylab="Índice de mortalidade previsto")
+plot(testhc$obitos16p,pred2, main = "Árvore predic. em subgrupo", cex=0.5,  xlab="Índice de mortalidade real", ylab=" ")
+```
+
+#####correlação na arvore de predição em 2017
+
+```{r corrl2017, echo = FALSE}
+cor(rl17$obitos16p,pred)
+postResample(pred = pred, obs = rl17$obitos16p)
+```
+
+#####correlação na arvore de predição em subgrupo 
+```{r corrl2016, echo= FALSE}
+cor(testhc$obitos16p,pred2)
+postResample(pred = pred2, obs = testhc$obitos16p)
+```
+
+####Árvore com componentes principais
+```{r treecp, echo=FALSE}
+
+fitcp <- rpart(cph16$obitos16p~ .,
+             method="anova", data=cph16, minsplit = 2, minbucket = 1)
+rpart.plot(fitcp)
+summary(fitcp)
+
+predcp <- predict(fitcp, cph17, weigth = peso2)
+plot(cph17$obitos16p,predcp, main = "Previsão por 2017 com as componentes principais", xlab="Índice de mortalidade real", ylab="Índice de mortalidade previsto")
+cor(cph17$obitos16p,predcp)
+postResample(pred = predcp, obs = cph17$obitos16p)
+
+```
+
+
+###Conclusões
+Aparentemente, o modelo de regressão linear múltipla se torna menos eficiente quando não é subdivido aleatoriamente em grupos de 70% a 30%. Em contrapartida, pelos índices de RMSE e MAE, a capacidade de predição dos dois modelos não varia muito, o que não fica evidenciado no plot de previsão subdivido, dado que o número de amostras (estados) é pequeno para esse tipo de previsão. A árvore de regressão também possui índices de RMSE e MAE similares ao apresentado pelos modelos de regressão, apresentando performance similar, além disso o gráfico ajustado para demonstrar maior número de nós, incluindo a região como um fator, apresenta resultados interessantes tanto para o banco de dados completo quanto para as componentes principais. No gráfico com o banco de dados completos vemos a incidência como o ramo predominante seguida pela taxa de centros de ensino e dispensação, tendo a maior taxa de mortalidade presente nos estados que não pertencem a região sudeste mas se encontram nas mesmas condições. No gráfico de árvores com as componentes principais, o perfil não se altera tanto, sendo a incidência ainda o ramo principal, seguido pelo indicador social (principalmente os IDH's) e apresentando maior impacto da região em seus ramos. 
+
+Assim sendo, podemos concluir que o modelo pela árvore de regressão apresenta mais resultados que discrevem o comportamento do banco de dados de 2016, mas ambos os modelos são inconclusivos na predição do índice de mortalidade com os dados de 2017 ou com a subdivisão dos dados. Contudo é importante ressaltar que além de que outras técnicas para melhor ajuste do modelo não foram usadas aqui (como o bootstrap), as variáveis numéricas foram transformadas o que pode ter influenciado os resultados aqui observados. 
