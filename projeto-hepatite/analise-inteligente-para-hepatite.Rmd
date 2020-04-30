@@ -1,10 +1,11 @@
 ---
 title: "Análise Inteligente dos Dados (Yuri AT)"
-output:
-  html_document:
-    toc: true
-    toc_depth: 6
-    theme: united
+#output:
+ # html_document:
+output: rmarkdown::github_document
+#  toc: true
+ # toc_depth: 6
+  #theme: united
 ---
 
 
